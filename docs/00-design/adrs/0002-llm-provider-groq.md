@@ -15,9 +15,12 @@ The generation step requires an LLM that can:
 ## Decision
 
 Use **[Groq](https://console.groq.com/)** as the LLM provider, with
-`llama3-8b-8192` (or the equivalent currently available open-weights
-model) as the default model. The model name is configurable via the
-`LLM_MODEL` environment variable.
+`llama-3.1-8b-instant` (or the equivalent currently available
+open-weights model) as the default. The model name is configurable
+via the `LLM_MODEL` environment variable, and Groq periodically
+deprecates and replaces models — see
+[Groq deprecations](https://console.groq.com/docs/deprecations) when
+the default stops working.
 
 The Groq client is wrapped behind a small `Generator` interface in
 `app/core/generation.py`, so tests can inject a fake.

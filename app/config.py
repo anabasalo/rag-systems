@@ -22,14 +22,18 @@ class Settings(BaseSettings):
     )
 
     groq_api_key: str = Field(default="", description="Groq API key (Phase 2+).")
-    llm_model: str = Field(default="llama3-8b-8192")
+    llm_model: str = Field(default="llama-3.1-8b-instant")
 
     embed_model: str = Field(default="all-MiniLM-L6-v2")
 
     chroma_persist_dir: Path = Field(default=Path("./data/chroma"))
 
     top_k: int = Field(default=5, ge=1, le=50)
-    similarity_floor: float = Field(default=0.2, ge=0.0, le=1.0)
+    # Cosine similarity ranges from -1 to 1. The floor is the minimum score a
+    # chunk must reach to be passed to the LLM. Below this we short-circuit
+    # with the safe "I cannot answer" message. -1.0 effectively disables the
+    # floor (used by tests that exercise filter logic with a fake embedder).
+    similarity_floor: float = Field(default=0.2, ge=-1.0, le=1.0)
 
     chunk_size: int = Field(default=2000, ge=100)
     chunk_overlap: int = Field(default=200, ge=0)

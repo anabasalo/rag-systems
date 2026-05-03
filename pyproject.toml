@@ -15,6 +15,11 @@ ignore = ["E501"]  # long lines: leave to formatter
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011"]  # asserts in tests
+# FastAPI's idiom uses Depends/File/Form in argument defaults.
+"app/api/*.py" = ["B008"]
+# Exception names match the public error codes in the API contract; we
+# deliberately do not append "Error" to keep the JSON `error` field readable.
+"app/core/exceptions.py" = ["N818"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
