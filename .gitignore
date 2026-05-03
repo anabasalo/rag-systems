@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# === rag-systems runtime state (not source) ===
+# ChromaDB persistent files
+/data/chroma/
+# Append-only structured query log
+/logs/
+# Local HuggingFace model cache (set HF_HOME=$(pwd)/.cache/huggingface)
+/.cache/
+
