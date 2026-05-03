@@ -65,3 +65,79 @@ def make_doc(tmp_path: Path):
         return path
 
     return _make
+
+
+class _FakeGenerator:
+    """Replaces ``GroqGenerator`` in API tests.
+
+    Records the last ``(system, user)`` pair so a test can assert the prompt
+    is shaped correctly. Returns a deterministic ``GenerationResult``.
+    """
+
+    def __init__(
+        self,
+        answer: str = "Mock answer.",
+        prompt_tokens: int | None = 100,
+        completion_tokens: int | None = 20,
+    ) -> None:
+        self.answer = answer
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.last_call: tuple[str, str] | None = None
+        self.calls = 0
+
+    def generate(self, system: str, user: str):
+        from app.core.generation import GenerationResult
+
+        self.calls += 1
+        self.last_call = (system, user)
+        return GenerationResult(
+            answer=self.answer,
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+        )
+
+
+@pytest.fixture
+def fake_generator() -> _FakeGenerator:
+    return _FakeGenerator()
+
+
+@pytest.fixture
+def client(tmp_chroma_dir, fake_embedder, fake_generator):
+    """A FastAPI TestClient with all external deps stubbed.
+
+    - Vector store: real ChromaDB pointed at ``tmp_chroma_dir``
+    - Embedder: deterministic fake (no model download)
+    - Generator: ``_FakeGenerator`` (no Groq call)
+    """
+    from fastapi.testclient import TestClient
+
+    from app.api.deps import (
+        get_embedder,
+        get_generator,
+        get_settings_dep,
+        get_vector_store,
+    )
+    from app.config import Settings
+    from app.db.vector_store import VectorStore
+    from app.main import create_app
+
+    app = create_app()
+    store = VectorStore(persist_dir=tmp_chroma_dir)
+
+    # Drop the similarity floor for API tests. The deterministic fake embedder
+    # returns essentially random-similarity vectors, so a non-zero floor would
+    # filter all results and mask the behavior we are actually testing.
+    test_settings = Settings(similarity_floor=-1.0)
+
+    app.dependency_overrides[get_vector_store] = lambda: store
+    app.dependency_overrides[get_embedder] = lambda: fake_embedder
+    app.dependency_overrides[get_generator] = lambda: fake_generator
+    app.dependency_overrides[get_settings_dep] = lambda: test_settings
+
+    test_client = TestClient(app)
+    # Attach helpers so individual tests can reach the fakes / app.
+    test_client.fake_generator = fake_generator  # type: ignore[attr-defined]
+    test_client.app_instance = app  # type: ignore[attr-defined]
+    return test_client
