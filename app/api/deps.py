@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.core.embedders import Embedder, SentenceTransformerEmbedder
 from app.core.generation import Generator, GroqGenerator
 from app.db.vector_store import VectorStore
+from app.eval.scorer import RagasScorer, Scorer
 
 
 @lru_cache(maxsize=1)
@@ -33,6 +34,16 @@ def _generator_singleton() -> Generator:
     return GroqGenerator(api_key=settings.groq_api_key, model=settings.llm_model)
 
 
+@lru_cache(maxsize=1)
+def _scorer_singleton() -> Scorer:
+    settings = get_settings()
+    return RagasScorer(
+        groq_api_key=settings.groq_api_key,
+        llm_model=settings.llm_model,
+        embedder=_embedder_singleton(),
+    )
+
+
 def get_settings_dep() -> Settings:
     return get_settings()
 
@@ -47,3 +58,7 @@ def get_embedder() -> Embedder:
 
 def get_generator() -> Generator:
     return _generator_singleton()
+
+
+def get_scorer() -> Scorer:
+    return _scorer_singleton()

@@ -103,19 +103,62 @@ def fake_generator() -> _FakeGenerator:
     return _FakeGenerator()
 
 
+class _FakeScorer:
+    """Deterministic stand-in for ``RagasScorer`` — no LLM calls.
+
+    Returns the same score (0.5 by default) for every metric of every
+    item. Items without a ``ground_truth`` correctly receive ``None``
+    for metrics that require one, mirroring the real scorer's contract.
+    Records the inputs so tests can assert *what* the runner asked the
+    scorer to score.
+    """
+
+    def __init__(self, value: float = 0.5) -> None:
+        self.value = value
+        self.calls: list = []
+
+    def score(self, items):
+        from app.eval.scorer import METRICS_REQUIRING_GROUND_TRUTH
+
+        self.calls.append(list(items))
+        out = []
+        for item in items:
+            row: dict[str, float | None] = {
+                "faithfulness": self.value,
+                "answer_relevancy": self.value,
+            }
+            if item.ground_truth is None:
+                row["context_precision"] = None
+                row["context_recall"] = None
+            else:
+                row["context_precision"] = self.value
+                row["context_recall"] = self.value
+            # Mark unused name to keep ruff happy on imported constant
+            assert "context_recall" in METRICS_REQUIRING_GROUND_TRUTH
+            out.append(row)
+        return out
+
+
 @pytest.fixture
-def client(tmp_chroma_dir, fake_embedder, fake_generator):
+def fake_scorer() -> _FakeScorer:
+    return _FakeScorer()
+
+
+@pytest.fixture
+def client(tmp_chroma_dir, fake_embedder, fake_generator, fake_scorer):
     """A FastAPI TestClient with all external deps stubbed.
 
     - Vector store: real ChromaDB pointed at ``tmp_chroma_dir``
     - Embedder: deterministic fake (no model download)
     - Generator: ``_FakeGenerator`` (no Groq call)
+    - Scorer:    ``_FakeScorer``    (no RAGAS call)
     """
     from fastapi.testclient import TestClient
 
     from app.api.deps import (
         get_embedder,
         get_generator,
+        get_scorer,
         get_settings_dep,
         get_vector_store,
     )
@@ -134,10 +177,12 @@ def client(tmp_chroma_dir, fake_embedder, fake_generator):
     app.dependency_overrides[get_vector_store] = lambda: store
     app.dependency_overrides[get_embedder] = lambda: fake_embedder
     app.dependency_overrides[get_generator] = lambda: fake_generator
+    app.dependency_overrides[get_scorer] = lambda: fake_scorer
     app.dependency_overrides[get_settings_dep] = lambda: test_settings
 
     test_client = TestClient(app)
     # Attach helpers so individual tests can reach the fakes / app.
     test_client.fake_generator = fake_generator  # type: ignore[attr-defined]
+    test_client.fake_scorer = fake_scorer  # type: ignore[attr-defined]
     test_client.app_instance = app  # type: ignore[attr-defined]
     return test_client

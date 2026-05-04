@@ -352,3 +352,128 @@ def test_compare_rejects_strategy_field(client):
         json={"question": "?", "collection": "demo", "strategy": "basic"},
     )
     assert response.status_code == 422
+
+
+# --- /evaluate ---
+
+
+def test_evaluate_returns_per_item_and_summary(client):
+    client.post(
+        "/ingest",
+        files=[_md_upload("k.md", "Kubernetes scales pods. " * 100)],
+        data={"collection": "k8s"},
+    )
+
+    response = client.post(
+        "/evaluate",
+        json={
+            "collection": "k8s",
+            "strategy": "basic",
+            "items": [
+                {"question": "How does scaling work?", "ground_truth": "Pods scale."},
+                {"question": "What about pods?"},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["collection"] == "k8s"
+    assert data["strategy"] == "basic"
+    assert data["item_count"] == 2
+    assert data["answered_count"] == 2
+    assert data["declined_count"] == 0
+
+    assert len(data["results"]) == 2
+    first = data["results"][0]
+    assert first["question"] == "How does scaling work?"
+    assert first["ground_truth"] == "Pods scale."
+    assert first["answer"] == "Mock answer."
+    assert first["retrieved_doc_names"]
+    assert all(name == "k.md" for name in first["retrieved_doc_names"])
+    assert first["metrics"]["faithfulness"] == 0.5
+    assert first["metrics"]["context_precision"] == 0.5
+
+    second = data["results"][1]
+    assert second["ground_truth"] is None
+    assert second["metrics"]["context_precision"] is None
+    assert second["metrics"]["context_recall"] is None
+
+    assert data["summary"]["faithfulness_avg"] == 0.5
+    # Only one item had ground_truth, so the gt-required metric average is over 1 item.
+    assert data["summary"]["context_precision_avg"] == 0.5
+
+
+def test_evaluate_unknown_collection_returns_404(client):
+    response = client.post(
+        "/evaluate",
+        json={
+            "collection": "missing",
+            "strategy": "basic",
+            "items": [{"question": "?"}],
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["error"] == "CollectionNotFound"
+
+
+def test_evaluate_empty_items_returns_422(client):
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "demo"})
+    response = client.post(
+        "/evaluate",
+        json={"collection": "demo", "strategy": "basic", "items": []},
+    )
+    assert response.status_code == 422
+
+
+def test_evaluate_with_improved_strategy(client):
+    client.post(
+        "/ingest",
+        files=[_md_upload("hpa.md", "Horizontal Pod Autoscaler. " * 50)],
+        data={"collection": "k8s"},
+    )
+    response = client.post(
+        "/evaluate",
+        json={
+            "collection": "k8s",
+            "strategy": "improved",
+            "items": [{"question": "horizontal pod autoscaler"}],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["strategy"] == "improved"
+    assert data["answered_count"] == 1
+
+
+def test_evaluate_below_floor_marks_item_declined(client):
+    """If similarity_floor blocks every chunk, the runner records the
+    safe answer and the scorer still runs (but on empty contexts)."""
+    from app.api.deps import get_settings_dep
+    from app.config import Settings
+
+    client.post(
+        "/ingest",
+        files=[_md_upload("k.md", "Kubernetes scales pods. " * 100)],
+        data={"collection": "k8s"},
+    )
+
+    high_floor = Settings(similarity_floor=0.99)
+    client.app_instance.dependency_overrides[get_settings_dep] = lambda: high_floor
+
+    response = client.post(
+        "/evaluate",
+        json={
+            "collection": "k8s",
+            "strategy": "basic",
+            "items": [{"question": "anything"}],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["declined_count"] == 1
+    assert data["answered_count"] == 0
+    assert data["results"][0]["answer"].startswith("I cannot answer")
+    assert data["results"][0]["retrieved_doc_names"] == []
+    # Generator was never called for declined items.
+    assert client.fake_generator.calls == 0
