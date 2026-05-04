@@ -116,6 +116,44 @@ class CompareResponse(BaseModel):
     improved: StrategyResult
 
 
+class EvaluateItem(BaseModel):
+    """One eval question. ``ground_truth`` is optional — some metrics
+    (faithfulness, answer relevancy) work without it; others (context
+    recall) need it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(..., min_length=1)
+    ground_truth: str | None = None
+
+
+class EvaluateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection: str = Field(..., pattern=COLLECTION_NAME_PATTERN)
+    strategy: RetrievalStrategy = "basic"
+    items: list[EvaluateItem] = Field(..., min_length=1, max_length=50)
+    k: int | None = Field(default=None, ge=1, le=50)
+
+
+class EvaluateResultItem(BaseModel):
+    question: str
+    answer: str
+    ground_truth: str | None = None
+    retrieved_doc_names: list[str]
+    metrics: dict[str, float | None]
+
+
+class EvaluateResponse(BaseModel):
+    collection: str
+    strategy: str
+    results: list[EvaluateResultItem]
+    summary: dict[str, float | None]
+    item_count: int
+    answered_count: int
+    declined_count: int
+
+
 class ErrorResponse(BaseModel):
     error: str
     message: str
