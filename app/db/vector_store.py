@@ -143,6 +143,65 @@ class VectorStore:
 
     # --- reads ---
 
+    def get_all_chunks(
+        self,
+        collection: str,
+        where: dict | None = None,
+        ids: Sequence[str] | None = None,
+        include_embeddings: bool = False,
+    ) -> list[RetrievedChunk]:
+        """Return chunks from ``collection``.
+
+        - If ``ids`` is given, only those chunks are returned (preserving
+          Chroma's natural ordering, not necessarily the input order).
+        - Else if ``where`` is given, chunks matching the metadata filter.
+        - Else every chunk in the collection.
+
+        ``score`` on each chunk is ``0.0`` (no query was run). When
+        ``include_embeddings`` is true, each chunk's ``metadata["_embedding"]``
+        carries the list-of-floats vector; this is how MMR re-ranking and
+        BM25 indexing fetch their working set without doing a vector query.
+        """
+        coll = self._get_collection_or_none(collection)
+        if coll is None:
+            return []
+
+        include = ["documents", "metadatas"]
+        if include_embeddings:
+            include.append("embeddings")
+
+        kwargs: dict = {"include": include}
+        if ids is not None:
+            kwargs["ids"] = list(ids)
+        if where is not None:
+            kwargs["where"] = where
+
+        result = coll.get(**kwargs)
+        result_ids = result.get("ids") or []
+        docs = result.get("documents") or []
+        metas = result.get("metadatas") or []
+        embeddings = result.get("embeddings") if include_embeddings else None
+
+        out: list[RetrievedChunk] = []
+        for i, chunk_id in enumerate(result_ids):
+            meta = dict(metas[i]) if i < len(metas) and metas[i] else {}
+            if include_embeddings and embeddings is not None and i < len(embeddings):
+                emb = embeddings[i]
+                # Chroma may return numpy arrays; coerce to plain Python floats
+                # so downstream code (and tests) does not need numpy.
+                meta["_embedding"] = [float(x) for x in emb]
+            out.append(
+                RetrievedChunk(
+                    chunk_id=chunk_id,
+                    doc_name=str(meta.get("doc_name", "")),
+                    chunk_index=int(meta.get("chunk_index", 0)),
+                    text=str(docs[i]) if i < len(docs) else "",
+                    score=0.0,
+                    metadata=meta,
+                )
+            )
+        return out
+
     def query(
         self,
         collection: str,

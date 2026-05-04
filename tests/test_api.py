@@ -258,3 +258,97 @@ def test_query_includes_chunk_index_in_prompt(client):
     _system, user = client.fake_generator.last_call
     assert "[1]" in user
     assert "(source: a.md)" in user
+
+
+# --- /query strategy=improved ---
+
+
+def test_query_with_improved_strategy_returns_improved(client):
+    client.post(
+        "/ingest",
+        files=[_md_upload("hpa.md", "Horizontal Pod Autoscaler scales pods. " * 50)],
+        data={"collection": "k8s"},
+    )
+    client.post(
+        "/ingest",
+        files=[_md_upload("ca.md", "Cluster Autoscaler resizes node pools. " * 50)],
+        data={"collection": "k8s"},
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "question": "horizontal pod autoscaler",
+            "collection": "k8s",
+            "strategy": "improved",
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["strategy"] == "improved"
+    assert data["sources"]
+    # BM25 should pull hpa.md to the top regardless of fake-embedder noise.
+    assert any(s["doc_name"] == "hpa.md" for s in data["sources"])
+
+
+def test_query_with_invalid_strategy_returns_422(client):
+    response = client.post(
+        "/query",
+        json={
+            "question": "anything",
+            "collection": "demo",
+            "strategy": "magic",
+        },
+    )
+    assert response.status_code == 422
+
+
+# --- /compare ---
+
+
+def test_compare_runs_both_strategies(client):
+    client.post(
+        "/ingest",
+        files=[_md_upload("hpa.md", "Horizontal Pod Autoscaler. " * 50)],
+        data={"collection": "k8s"},
+    )
+    client.post(
+        "/ingest",
+        files=[_md_upload("vpa.md", "Vertical Pod Autoscaler. " * 50)],
+        data={"collection": "k8s"},
+    )
+
+    response = client.post(
+        "/compare",
+        json={"question": "horizontal pod autoscaler", "collection": "k8s"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["question"] == "horizontal pod autoscaler"
+    assert data["collection"] == "k8s"
+
+    assert data["basic"]["strategy"] == "basic"
+    assert data["improved"]["strategy"] == "improved"
+    assert data["basic"]["sources"]
+    assert data["improved"]["sources"]
+    assert data["basic"]["latency_ms"] >= 0
+    assert data["improved"]["latency_ms"] >= 0
+    # Both strategies call the (mocked) generator once each.
+    assert client.fake_generator.calls == 2
+
+
+def test_compare_unknown_collection_returns_404(client):
+    response = client.post("/compare", json={"question": "anything", "collection": "missing"})
+    assert response.status_code == 404
+    assert response.json()["error"] == "CollectionNotFound"
+
+
+def test_compare_rejects_strategy_field(client):
+    """``strategy`` is meaningless for /compare and must be rejected."""
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "demo"})
+    response = client.post(
+        "/compare",
+        json={"question": "?", "collection": "demo", "strategy": "basic"},
+    )
+    assert response.status_code == 422
