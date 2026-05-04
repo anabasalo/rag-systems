@@ -52,13 +52,27 @@ class DocFilter(BaseModel):
     tags: list[str] | None = None
 
 
+RetrievalStrategy = Literal["basic", "improved"]
+
+
 class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(..., min_length=1)
     collection: str = Field(..., pattern=COLLECTION_NAME_PATTERN)
     doc_filter: DocFilter | None = None
-    strategy: Literal["basic"] = "basic"
+    strategy: RetrievalStrategy = "basic"
+    k: int | None = Field(default=None, ge=1, le=50)
+
+
+class CompareRequest(BaseModel):
+    """Run both strategies on the same question. ``strategy`` is ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(..., min_length=1)
+    collection: str = Field(..., pattern=COLLECTION_NAME_PATTERN)
+    doc_filter: DocFilter | None = None
     k: int | None = Field(default=None, ge=1, le=50)
 
 
@@ -82,6 +96,24 @@ class QueryResponse(BaseModel):
     sources: list[SourceChunk]
     latency_ms: int
     tokens: TokenUsage | None = None
+
+
+class StrategyResult(BaseModel):
+    """One side of a /compare response — same payload as a /query, minus
+    the redundant ``collection`` (the parent envelope carries it)."""
+
+    answer: str
+    strategy: str
+    sources: list[SourceChunk]
+    latency_ms: int
+    tokens: TokenUsage | None = None
+
+
+class CompareResponse(BaseModel):
+    question: str
+    collection: str
+    basic: StrategyResult
+    improved: StrategyResult
 
 
 class ErrorResponse(BaseModel):
