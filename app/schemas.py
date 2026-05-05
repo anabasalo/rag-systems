@@ -154,6 +154,35 @@ class EvaluateResponse(BaseModel):
     declined_count: int
 
 
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+    collections: int
+
+
+class LogEntry(BaseModel):
+    """One structured query-log line. Fields mirror ``QueryLogger.record``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ts: str
+    endpoint: str
+    status: str
+    collection: str | None = None
+    strategy: str | None = None
+    question: str | None = None
+    n_sources: int | None = None
+    latency_ms: int | None = None
+    tokens: dict | None = None
+    error: str | None = None
+    extra: dict = Field(default_factory=dict)
+
+
+class LogsResponse(BaseModel):
+    limit: int
+    entries: list[LogEntry]
+
+
 class ErrorResponse(BaseModel):
     error: str
     message: str

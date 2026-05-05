@@ -446,6 +446,124 @@ def test_evaluate_with_improved_strategy(client):
     assert data["answered_count"] == 1
 
 
+# --- /health ---
+
+
+def test_health_returns_ok_and_version(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["version"]
+    assert "collections" in data
+    assert isinstance(data["collections"], int)
+
+
+def test_health_collection_count_reflects_state(client):
+    assert client.get("/health").json()["collections"] == 0
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "col1"})
+    client.post("/ingest", files=[_md_upload("b.md", "b. " * 50)], data={"collection": "col2"})
+    assert client.get("/health").json()["collections"] == 2
+
+
+# --- /logs ---
+
+
+def test_logs_returns_recent_entries(client):
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "demo"})
+    client.post("/query", json={"question": "anything", "collection": "demo"})
+
+    response = client.get("/logs?limit=10")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["limit"] == 10
+    # /query was logged; /ingest and /health are not, by design.
+    endpoints = [e["endpoint"] for e in data["entries"]]
+    assert endpoints == ["/query"]
+
+
+def test_logs_default_limit_is_50(client):
+    response = client.get("/logs")
+    assert response.status_code == 200
+    assert response.json()["limit"] == 50
+
+
+def test_logs_limit_above_500_returns_422(client):
+    response = client.get("/logs?limit=501")
+    assert response.status_code == 422
+
+
+def test_logs_limit_zero_returns_422(client):
+    response = client.get("/logs?limit=0")
+    assert response.status_code == 422
+
+
+# --- query log wiring ---
+
+
+def test_query_writes_log_entry_with_expected_fields(client):
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "demo"})
+    client.post("/query", json={"question": "What is alpha?", "collection": "demo"})
+
+    entries = client.query_log.tail(limit=10)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["endpoint"] == "/query"
+    assert entry["collection"] == "demo"
+    assert entry["strategy"] == "basic"
+    assert entry["question"] == "What is alpha?"
+    assert entry["status"] == "ok"
+    assert entry["n_sources"] >= 1
+    assert entry["latency_ms"] is not None
+    assert entry["tokens"] == {"prompt": 100, "completion": 20}
+
+
+def test_query_below_floor_logs_status_declined(client):
+    from app.api.deps import get_settings_dep
+    from app.config import Settings
+
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "demo"})
+    high_floor = Settings(similarity_floor=0.99)
+    client.app_instance.dependency_overrides[get_settings_dep] = lambda: high_floor
+
+    client.post("/query", json={"question": "anything", "collection": "demo"})
+    entry = client.query_log.tail(1)[0]
+    assert entry["status"] == "declined"
+    assert entry["n_sources"] == 0
+    assert entry["tokens"] is None
+
+
+def test_compare_writes_one_log_entry_per_request(client):
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "demo"})
+    client.post("/compare", json={"question": "?", "collection": "demo"})
+
+    entries = client.query_log.tail(10)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["endpoint"] == "/compare"
+    assert entry["strategy"] == "basic+improved"
+    assert entry["extra"]["basic"]["n_sources"] >= 0
+    assert entry["extra"]["improved"]["n_sources"] >= 0
+
+
+def test_evaluate_writes_log_entry_with_summary(client):
+    client.post("/ingest", files=[_md_upload("a.md", "a. " * 50)], data={"collection": "demo"})
+    client.post(
+        "/evaluate",
+        json={
+            "collection": "demo",
+            "strategy": "basic",
+            "items": [{"question": "?", "ground_truth": "alpha"}],
+        },
+    )
+    entry = client.query_log.tail(1)[0]
+    assert entry["endpoint"] == "/evaluate"
+    assert entry["strategy"] == "basic"
+    assert entry["extra"]["item_count"] == 1
+    assert entry["extra"]["answered_count"] == 1
+    assert "summary" in entry["extra"]
+
+
 def test_evaluate_below_floor_marks_item_declined(client):
     """If similarity_floor blocks every chunk, the runner records the
     safe answer and the scorer still runs (but on empty contexts)."""
