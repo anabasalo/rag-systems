@@ -1,0 +1,36 @@
+# Local development stack. Single service — no DB or queue needed.
+# Persistent state lives on the host so that ``docker compose down``
+# does not lose ingested documents or query logs.
+#
+# Bring it up:    docker compose up --build
+# Tail logs:      docker compose logs -f api
+# Reset state:    rm -rf data/chroma logs && docker compose up --build
+services:
+  api:
+    build: .
+    image: rag-systems:dev
+    container_name: rag-systems
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      # Persistent application state.
+      - ./data/chroma:/app/data/chroma
+      - ./logs:/app/logs
+      # Re-use the host's data dir so /ingest can find files at the
+      # paths the docs reference. Read-only is fine.
+      - ./data/raw:/app/data/raw:ro
+      - ./data/eval:/app/data/eval:ro
+      # Persist the HuggingFace embedding model across container rebuilds.
+      - hf_cache:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  hf_cache:

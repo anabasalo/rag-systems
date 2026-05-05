@@ -41,10 +41,9 @@ sentence-transformers model.
 | 2 | `02-rag-pipeline/` | FastAPI, prompt assembly, citations | ~6 h |
 | 3 | [`03-retrieval-strategies/`](03-retrieval-strategies/) | BM25, hybrid retrieval, MMR re-ranking | ~6 h |
 | 4 | [`04-evaluation/`](04-evaluation/) | RAGAS, faithfulness, context precision | ~4 h |
-| 5 | `05-observability-deployment/` | Structured logging, Docker, CI | ~5 h |
+| 5 | [`05-observability-deployment/`](05-observability-deployment/) | Structured logging, Docker, CI | ~5 h |
 
-Phases 1–5 will be added as the project is built. This document tracks the
-intended scope; the source of truth for what is implemented is the code in
+The source of truth for what is implemented is the code in
 `app/` and the tests in `tests/`.
 
 ## How each phase doc is organized

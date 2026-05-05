@@ -1,0 +1,29 @@
+# Keep the build context small.
+.git
+.github
+.venv
+.cache
+.idea
+.vscode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Runtime state -- mounted via the compose file, not baked into the image.
+data/chroma/
+logs/
+
+# Things never needed inside the container.
+docs/
+tests/
+.env
+.env.local
+.dockerignore
+Dockerfile
+docker-compose.yml
+README.md
+*.md

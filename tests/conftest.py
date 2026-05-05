@@ -145,19 +145,29 @@ def fake_scorer() -> _FakeScorer:
 
 
 @pytest.fixture
-def client(tmp_chroma_dir, fake_embedder, fake_generator, fake_scorer):
+def tmp_query_log(tmp_path: Path):
+    """A QueryLogger that writes to a tmp file instead of ./logs/."""
+    from app.observability.query_log import QueryLogger
+
+    return QueryLogger(path=tmp_path / "queries.jsonl")
+
+
+@pytest.fixture
+def client(tmp_chroma_dir, fake_embedder, fake_generator, fake_scorer, tmp_query_log):
     """A FastAPI TestClient with all external deps stubbed.
 
     - Vector store: real ChromaDB pointed at ``tmp_chroma_dir``
     - Embedder: deterministic fake (no model download)
     - Generator: ``_FakeGenerator`` (no Groq call)
     - Scorer:    ``_FakeScorer``    (no RAGAS call)
+    - QueryLogger: writes to a tmp file (no ./logs/ pollution)
     """
     from fastapi.testclient import TestClient
 
     from app.api.deps import (
         get_embedder,
         get_generator,
+        get_query_logger,
         get_scorer,
         get_settings_dep,
         get_vector_store,
@@ -178,11 +188,13 @@ def client(tmp_chroma_dir, fake_embedder, fake_generator, fake_scorer):
     app.dependency_overrides[get_embedder] = lambda: fake_embedder
     app.dependency_overrides[get_generator] = lambda: fake_generator
     app.dependency_overrides[get_scorer] = lambda: fake_scorer
+    app.dependency_overrides[get_query_logger] = lambda: tmp_query_log
     app.dependency_overrides[get_settings_dep] = lambda: test_settings
 
     test_client = TestClient(app)
     # Attach helpers so individual tests can reach the fakes / app.
     test_client.fake_generator = fake_generator  # type: ignore[attr-defined]
     test_client.fake_scorer = fake_scorer  # type: ignore[attr-defined]
+    test_client.query_log = tmp_query_log  # type: ignore[attr-defined]
     test_client.app_instance = app  # type: ignore[attr-defined]
     return test_client

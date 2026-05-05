@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import (
     get_embedder,
     get_generator,
+    get_query_logger,
     get_settings_dep,
     get_vector_store,
 )
@@ -35,6 +36,7 @@ from app.core.retrieval import (
     improved_retrieve,
 )
 from app.db.vector_store import VectorStore
+from app.observability.query_log import QueryLogger
 from app.schemas import (
     CompareRequest,
     CompareResponse,
@@ -135,6 +137,7 @@ def query_endpoint(
     vector_store: VectorStore = Depends(get_vector_store),
     embedder: Embedder = Depends(get_embedder),
     generator: Generator = Depends(get_generator),
+    query_logger: QueryLogger = Depends(get_query_logger),
 ) -> QueryResponse:
     k = body.k or settings.top_k
     doc_filter = body.doc_filter.model_dump(exclude_none=True) if body.doc_filter else None
@@ -149,6 +152,17 @@ def query_endpoint(
         settings=settings,
         k=k,
         doc_filter=doc_filter,
+    )
+
+    query_logger.record(
+        endpoint="/query",
+        status="declined" if not sources else "ok",
+        collection=body.collection,
+        strategy=strategy_name,
+        question=body.question,
+        n_sources=len(sources),
+        latency_ms=latency_ms,
+        tokens=tokens.model_dump() if tokens else None,
     )
 
     return QueryResponse(
@@ -168,6 +182,7 @@ def compare_endpoint(
     vector_store: VectorStore = Depends(get_vector_store),
     embedder: Embedder = Depends(get_embedder),
     generator: Generator = Depends(get_generator),
+    query_logger: QueryLogger = Depends(get_query_logger),
 ) -> CompareResponse:
     """Run ``basic`` and ``improved`` on the same question; return both."""
     k = body.k or settings.top_k
@@ -197,6 +212,29 @@ def compare_endpoint(
             k=k,
             doc_filter=doc_filter,
         )
+    )
+
+    query_logger.record(
+        endpoint="/compare",
+        status="ok",
+        collection=body.collection,
+        strategy="basic+improved",
+        question=body.question,
+        n_sources=len(basic_sources) + len(improved_sources),
+        latency_ms=basic_latency + improved_latency,
+        tokens=None,
+        extra={
+            "basic": {
+                "n_sources": len(basic_sources),
+                "latency_ms": basic_latency,
+                "tokens": basic_tokens.model_dump() if basic_tokens else None,
+            },
+            "improved": {
+                "n_sources": len(improved_sources),
+                "latency_ms": improved_latency,
+                "tokens": improved_tokens.model_dump() if improved_tokens else None,
+            },
+        },
     )
 
     return CompareResponse(

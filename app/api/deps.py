@@ -14,6 +14,7 @@ from app.core.embedders import Embedder, SentenceTransformerEmbedder
 from app.core.generation import Generator, GroqGenerator
 from app.db.vector_store import VectorStore
 from app.eval.scorer import RagasScorer, Scorer
+from app.observability.query_log import QueryLogger
 
 
 @lru_cache(maxsize=1)
@@ -44,6 +45,12 @@ def _scorer_singleton() -> Scorer:
     )
 
 
+@lru_cache(maxsize=1)
+def _query_logger_singleton() -> QueryLogger:
+    settings = get_settings()
+    return QueryLogger(path=settings.query_log_path)
+
+
 def get_settings_dep() -> Settings:
     return get_settings()
 
@@ -62,3 +69,7 @@ def get_generator() -> Generator:
 
 def get_scorer() -> Scorer:
     return _scorer_singleton()
+
+
+def get_query_logger() -> QueryLogger:
+    return _query_logger_singleton()

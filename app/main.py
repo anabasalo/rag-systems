@@ -17,7 +17,9 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.api import evaluate as evaluate_api
+from app.api import health as health_api
 from app.api import ingest as ingest_api
+from app.api import logs as logs_api
 from app.api import query as query_api
 from app.core.exceptions import CollectionNotFound, DocumentNotFound, LLMUnavailable
 from app.core.ingestion import IngestionError
@@ -36,6 +38,8 @@ def create_app() -> FastAPI:
     app.include_router(ingest_api.router)
     app.include_router(query_api.router)
     app.include_router(evaluate_api.router)
+    app.include_router(health_api.router)
+    app.include_router(logs_api.router)
 
     @app.exception_handler(CollectionNotFound)
     async def _collection_404(_request: Request, exc: CollectionNotFound) -> JSONResponse:
